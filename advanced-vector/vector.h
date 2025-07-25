@@ -205,11 +205,11 @@ public:
     }
 
     void PushBack(const T& value) {
-        PushBackImpl(value);
+        /* возвращенное значение не нужно*/ EmplaceBackImpl(value);
     }
 
     void PushBack(T&& value) {
-        PushBackImpl(std::move(value));
+        /* возвращенное значение не нужно*/ EmplaceBackImpl(std::move(value));
     }
 
     template <typename... Args>
@@ -218,24 +218,27 @@ public:
     }
 
     void PopBack() noexcept {
-        std::destroy_at(data_.GetAddress() + size_ - 1);
+        assert(size_ != 0);
+        std::destroy_at(end() - 1);
         --size_;
     }
 
     template <typename... Args>
     iterator Emplace(const_iterator pos, Args&&... args) {
+        assert(pos >= begin() && pos <= end());
         T* pos_it = begin() + (pos - begin());
         if (size_ < data_.Capacity()) {
             if (pos == end()) {
                 new (data_.GetAddress() + size_) T(std::forward<Args>(args)...);
             } else {
                 T copy{std::forward<Args>(args)...};
-                if constexpr (std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>) {
-                    new (begin() + size_) T(std::move(data_[size_ - 1]));
-                } else {
-                    new (begin() + size_) T(data_[size_ - 1]);
+                new (begin() + size_) T(std::move(data_[size_ - 1]));
+                try {
+                    std::move_backward(pos_it, end() - 1, end());
+                } catch (...) {
+                    std::destroy_at(begin() + size_);
+                    throw;
                 }
-                std::move_backward(pos_it, end() - 1, end());
                 *pos_it = std::move(copy);
             }
         } else {
@@ -262,6 +265,7 @@ public:
     }
 
     iterator Erase(const_iterator pos) /*noexcept(std::is_nothrow_move_assignable_v<T>)*/ {
+        assert(pos >= begin() && pos < end());
         size_t diff = pos - begin();
         T* pos_it = begin() + diff;
         if (pos != end() - 1) {
@@ -323,20 +327,6 @@ private:
         }
     }
 
-    template <typename U>
-    void PushBackImpl(U&& value) {
-        if (size_ < data_.Capacity()) {
-            new (data_.GetAddress() + size_) T(std::forward<U>(value));
-        } else {
-            RawMemory<T> new_data(size_ == 0 ? 1 : size_ * 2);
-            new (new_data.GetAddress() + size_) T(std::forward<U>(value));
-            UninitializedMoveOrCopyN(data_.GetAddress(), size_, new_data.GetAddress());
-            std::destroy_n(data_.GetAddress(), size_);
-            data_.Swap(new_data);
-        }
-        ++size_;
-    }
-
     template <typename... Args>
     T& EmplaceBackImpl(Args&&... args) {
         if (size_ < data_.Capacity()) {
@@ -344,7 +334,12 @@ private:
         } else {
             RawMemory<T> new_data(size_ == 0 ? 1 : size_ * 2);
             new (new_data.GetAddress() + size_) T(std::forward<Args>(args)...);
-            UninitializedMoveOrCopyN(data_.GetAddress(), size_, new_data.GetAddress());
+            try {
+                UninitializedMoveOrCopyN(data_.GetAddress(), size_, new_data.GetAddress());
+            } catch (...) {
+                std::destroy_at(new_data.GetAddress() + size_);
+                throw;
+            }
             std::destroy_n(data_.GetAddress(), size_);
             data_.Swap(new_data);
         }

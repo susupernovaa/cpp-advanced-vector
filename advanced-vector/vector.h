@@ -235,11 +235,11 @@ public:
                 new (begin() + size_) T(std::move(data_[size_ - 1]));
                 try {
                     std::move_backward(pos_it, end() - 1, end());
+                    *pos_it = std::move(copy);
                 } catch (...) {
                     std::destroy_at(begin() + size_);
                     throw;
                 }
-                *pos_it = std::move(copy);
             }
         } else {
             RawMemory<T> new_data(size_ == 0 ? 1 : size_ * 2);
